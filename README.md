@@ -75,9 +75,6 @@ use a fresh path for each run. -->
     --gpus 1 2 --ports 8001 8002 --clients-per-server 2 --execute
 ```
 
-Outputs per condition are `episodes.jsonl`, `summary.json`, and `manifest.json`. The root holds `summary.csv`
-and `SUMMARY.md`.
-
 ## Noise and horizon steering
 
 
