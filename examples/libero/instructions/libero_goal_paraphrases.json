@@ -1,0 +1,15 @@
+{
+  "suite": "libero_goal",
+  "instructions": {
+    "open the middle drawer of the cabinet": "Pull open the cabinet's middle drawer.",
+    "put the bowl on the stove": "Place the bowl onto the stove.",
+    "put the wine bottle on top of the cabinet": "Set the wine bottle on the top surface of the cabinet.",
+    "open the top drawer and put the bowl inside": "Open the cabinet's top drawer, then place the bowl inside it.",
+    "put the bowl on top of the cabinet": "Place the bowl on the cabinet's top surface.",
+    "push the plate to the front of the stove": "Slide the plate toward the front of the stove.",
+    "put the cream cheese in the bowl": "Place the cream cheese package inside the bowl.",
+    "turn on the stove": "Switch the stove on.",
+    "put the bowl on the plate": "Place the bowl onto the plate.",
+    "put the wine bottle on the rack": "Place the wine bottle onto the rack."
+  }
+}
