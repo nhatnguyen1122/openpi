@@ -28,7 +28,7 @@ class FakeSteeringServer:
             "policy_seed": 0,
             "steering": {
                 "key": common.STEERING_KEY,
-                "ops": ["act", "embed", "infer"],
+                "ops": ["act", "act_batch", "embed", "infer"],
                 "action_horizon": HORIZON,
                 "action_dim": MODEL_DIM,
                 "max_sessions": 16,
@@ -45,6 +45,12 @@ class FakeSteeringServer:
             embedding = np.resize(state, EMBED_DIM).astype(np.float32)
             return {"prefix_embedding": embedding, "steering": {"op": "embed", "num_steps": 10}}
         noise = np.asarray(request["noise"], np.float32)
+        if request["op"] == "act_batch":
+            assert set(obs) == {common.STEERING_KEY}
+            assert noise.shape[1:] == (HORIZON, MODEL_DIM)
+            self.noises.extend(noise)
+            actions = noise[:, :, :7] + self.prefixes[request["session"]][0]
+            return {"actions": actions, "steering": {"op": "act_batch", "num_steps": request.get("num_steps", 10)}}
         assert noise.shape == (HORIZON, MODEL_DIM)
         if request["op"] == "infer":
             state = np.asarray(obs["observation/state"], np.float32)

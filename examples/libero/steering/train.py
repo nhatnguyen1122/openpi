@@ -197,6 +197,12 @@ class LiberoTaskFactory:
             evicted.env.close()
         return wrapped
 
+    def drop(self, suite_name: str, task_id: int) -> None:
+        """Closes and forgets one environment so that the next `get` builds a fresh one."""
+        evicted = self._cache.pop((suite_name, task_id), None)
+        if evicted is not None:
+            evicted.env.close()
+
     def close(self):
         for wrapped in self._cache.values():
             wrapped.env.close()

@@ -257,7 +257,18 @@ class Pi0(_model.BaseModel):
         *,
         num_steps: int | at.Int[at.Array, ""] = 10,
     ) -> _model.Actions:
-        """Integrates the flow from `noise` using a prefix computed by `prefill_steering`."""
+        """Integrates the flow from `noise` using a prefix computed by `prefill_steering`.
+
+        A batch-1 prefix is shared by every noise sample when `noise` has a larger batch (candidate chunks for one
+        observation); the prefix is computed only once.
+        """
+        batch, prefix_batch = noise.shape[0], prefix_mask.shape[0]
+        if batch != prefix_batch:
+            if prefix_batch != 1:
+                raise ValueError(f"Cannot broadcast a prefix of batch {prefix_batch} to {batch} noise samples")
+            observation = jax.tree.map(lambda x: jnp.repeat(x, batch, axis=0), observation)
+            prefix_mask = jnp.repeat(prefix_mask, batch, axis=0)
+            kv_cache = jax.tree.map(lambda x: jnp.repeat(x, batch, axis=1), kv_cache)  # [layers, batch, ...]
         return self._denoise(observation, prefix_mask, kv_cache, noise, num_steps)
 
     def _prefill(

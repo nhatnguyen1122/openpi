@@ -168,6 +168,18 @@ class SteeringClient:
             raise ValueError(f"Invalid action chunk from server: shape {actions.shape}")
         return actions
 
+    def act_batch(self, noise: np.ndarray, num_steps: int | None = None) -> np.ndarray:
+        """N candidate chunks [N, H, action_dim] for the latest `embed`, from noise [N, H, D] in one model call."""
+        request = {"op": "act_batch", "session": self.session, "noise": np.asarray(noise, np.float32)}
+        if num_steps is not None:
+            request["num_steps"] = int(num_steps)
+        response = self._policy.infer({STEERING_KEY: request})
+        self._check(response, "act_batch")
+        actions = np.asarray(response["actions"])
+        if actions.ndim != 3 or len(actions) != len(noise) or not np.isfinite(actions).all():
+            raise ValueError(f"Invalid candidate chunks from server: shape {actions.shape}")
+        return actions
+
     @staticmethod
     def _check(response: dict, op: str) -> None:
         if response.get("steering", {}).get("op") != op:
@@ -178,3 +190,18 @@ def write_json(path: pathlib.Path, value: Any) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, indent=2) + "\n")
     temporary.replace(path)
+
+
+def save_video(path: str | pathlib.Path, frames: list[np.ndarray], fps: int = 10) -> None:
+    """Writes an mp4 (same codec settings as examples/libero/main.py)."""
+    import imageio
+
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    imageio.mimwrite(path, [np.asarray(frame) for frame in frames], fps=fps)
+
+
+def video_name(suite: str, task_description: str, index: int, *, success: bool) -> str:
+    """main.py's naming, so rollouts line up with the baseline videos by initial-state index."""
+    suffix = "success" if success else "failure"
+    return f"rollout_{suite}_{task_description.replace(' ', '_')}_{index:03d}_{suffix}.mp4"

@@ -27,8 +27,12 @@ STEERING_KEY = "_openpi_steering"
 _STEERING_KEYS = {
     "embed": {"op", "session"},
     "act": {"op", "session", "noise", "num_steps"},
+    "act_batch": {"op", "session", "noise", "num_steps"},
     "infer": {"op", "noise", "num_steps"},
 }
+
+
+_MAX_STEERING_BATCH = 64
 
 
 @dataclasses.dataclass(frozen=True)
@@ -169,6 +173,7 @@ class Policy(BasePolicy):
         Ops:
             embed: observation -> pooled prefix embedding. The prefix (KV cache) is kept under `session`.
             act: noise [+ num_steps] -> actions, reusing the prefix of the last `embed` in `session`. No observation.
+            act_batch: like act for noise [N, H, D] -> actions [N, ...]: N candidate chunks from one prefix.
             infer: observation + noise -> actions and embedding in one call (stateless).
 
         Noise lives in the model's normalized action space with shape [action_horizon, action_dim], including padded
@@ -190,7 +195,7 @@ class Policy(BasePolicy):
 
         start_time = time.monotonic()
         embedding = None
-        if op == "act":
+        if op in ("act", "act_batch"):
             if obs:
                 raise ValueError("Steering act requests reuse the session prefix and must not include observations")
             prefix = self._steering_sessions.get(request["session"])
@@ -211,6 +216,21 @@ class Policy(BasePolicy):
             while len(self._steering_sessions) > self._max_steering_sessions:
                 self._steering_sessions.popitem(last=False)
             outputs = {"prefix_embedding": embedding}
+        elif op == "act_batch":
+            noise = np.asarray(request["noise"], dtype=np.float32)
+            if noise.ndim != 3 or not 1 <= len(noise) <= _MAX_STEERING_BATCH:
+                raise ValueError(f"act_batch noise must have shape [N, H, D] with 1 <= N <= {_MAX_STEERING_BATCH}")
+            noise = np.stack([self._validate_steering_noise(n) for n in noise])
+            actions = np.asarray(
+                self._sample_from_prefix(
+                    prefix.observation, prefix.prefix_mask, prefix.kv_cache, jnp.asarray(noise), num_steps=num_steps
+                )
+            )
+            outputs = {
+                "actions": np.stack(
+                    [self._output_transform({"state": prefix.state, "actions": chunk})["actions"] for chunk in actions]
+                )
+            }
         else:
             actions = self._sample_from_prefix(
                 prefix.observation,

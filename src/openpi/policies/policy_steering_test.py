@@ -124,3 +124,18 @@ def test_unsupported_models_report_no_steering(monkeypatch):
     assert instance.steering_metadata is None
     with pytest.raises(ValueError, match="does not support"):
         instance.infer(_request(op="infer", noise=_noise()))
+
+
+def test_act_batch_returns_one_chunk_per_noise(steered):
+    instance, fake = steered
+    instance.infer({"state": np.array([1.0, 2.0]), **_request(op="embed", session="a")})
+    noise = np.stack([_noise(0.0), _noise(1.0), _noise(2.0)])
+    out = instance.infer(_request(op="act_batch", session="a", noise=noise))
+    assert out["actions"].shape == (3, HORIZON, 2)
+    for i in range(3):
+        single = instance.infer(_request(op="act", session="a", noise=noise[i]))["actions"]
+        np.testing.assert_array_equal(out["actions"][i], single)
+    assert out["steering"]["op"] == "act_batch"
+    assert fake.prefills == 1
+    with pytest.raises(ValueError, match="N, H, D"):
+        instance.infer(_request(op="act_batch", session="a", noise=_noise()))

@@ -12,6 +12,11 @@ import numpy as np
 from . import common
 
 LIBERO_DUMMY_ACTION = [0.0] * 6 + [-1.0]
+MAX_RESET_ATTEMPTS = 20  # each attempt already retries the object placement 5000 times inside LIBERO
+
+
+class ResetError(RuntimeError):
+    """LIBERO could not place the objects; the caller should recreate the environment."""
 
 
 @dataclasses.dataclass
@@ -61,6 +66,8 @@ class SteeringEnv:
         self.t = 0
         self._n_prev = 0
         self.vla_seconds = 0.0
+        self.record = False  # when True, `frames` holds the agentview images of the current episode
+        self.frames: list[np.ndarray] = []
 
     # ----------------------------------------------------------------------------------------------------------------
     def satisfied_predicates(self) -> int:
@@ -73,7 +80,7 @@ class SteeringEnv:
 
     def reset(self, init_state: np.ndarray | None = None) -> None:
         """Resets the task. Pass `init_state` only for evaluation; training uses LIBERO's randomized placement."""
-        obs = self.env.reset()
+        obs = self._reset_raw()
         if init_state is not None:
             obs = self.env.set_init_state(init_state)
         for _ in range(self.num_steps_wait):  # let objects settle, as in main.py
@@ -82,6 +89,24 @@ class SteeringEnv:
         self.t = 0
         self._n_prev = self.satisfied_predicates()
         self.vla_seconds = 0.0
+        self.frames = [self._frame()] if self.record else []
+
+    def _reset_raw(self) -> dict:
+        # LIBERO's ControlEnv.reset retries a failed placement forever, which can hang a worker indefinitely.
+        inner = self.env.env
+        if not hasattr(inner, "reset"):  # test fakes
+            return self.env.reset()
+        from robosuite.utils.errors import RandomizationError
+
+        for _ in range(MAX_RESET_ATTEMPTS):
+            try:
+                return inner.reset()
+            except RandomizationError:
+                continue
+        raise ResetError(f"Could not place the objects in {MAX_RESET_ATTEMPTS} attempts")
+
+    def _frame(self) -> np.ndarray:
+        return np.ascontiguousarray(self.obs["agentview_image"][::-1, ::-1])  # upright, as in main.py
 
     def embed(self) -> np.ndarray:
         """Embeds the current observation; the server keeps its prefix for the next `step_macro`."""
@@ -100,13 +125,26 @@ class SteeringEnv:
         self.vla_seconds += time.monotonic() - start
         if len(actions) < k:
             raise ValueError(f"Policy returned {len(actions)} actions but k={k}")
+        return self.execute(actions[:k])
+
+    def sample_chunks(self, noise: np.ndarray) -> np.ndarray:
+        """Candidate chunks [N, H, action_dim] from noise [N, H, D] for the last embedded observation."""
+        start = time.monotonic()
+        chunks = self.client.act_batch(noise, self.spec.num_flow_steps)
+        self.vla_seconds += time.monotonic() - start
+        return chunks
+
+    def execute(self, actions: np.ndarray) -> MacroResult:
+        """Executes actions until they run out, the task succeeds or the step limit is reached."""
         gamma = self.spec.gamma
         total, discount, success = 0.0, 1.0, False
         steps = 0
-        for action in actions[:k]:
+        for action in actions:
             self.obs, _, done, _ = self.env.step(np.asarray(action).tolist())
             self.t += 1
             steps += 1
+            if self.record:
+                self.frames.append(self._frame())
             success = bool(done)  # LIBERO returns done=True exactly when the goal holds.
             n = self.satisfied_predicates()
             reward = float(success) + gamma * self.potential(n) - self.potential(self._n_prev)

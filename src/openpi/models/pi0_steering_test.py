@@ -54,3 +54,15 @@ def test_embedding_ignores_masked_prompt_tokens(tiny_pi05):
     embedding = np.asarray(prefill(observation)[0])
     np.testing.assert_allclose(np.asarray(prefill(with_token(-1, 7))[0]), embedding, rtol=1e-5, atol=1e-5)
     assert not np.allclose(np.asarray(prefill(with_token(0, 7))[0]), embedding)
+
+
+def test_batched_noise_shares_one_prefix(tiny_pi05):
+    config, model = tiny_pi05
+    _, prepared, prefix_mask, kv_cache = nnx_utils.module_jit(model.prefill_steering)(config.fake_obs(1))
+    noise = jax.random.normal(jax.random.key(4), (3, config.action_horizon, config.action_dim))
+    from_prefix = nnx_utils.module_jit(model.sample_actions_from_prefix)
+    batched = np.asarray(from_prefix(prepared, prefix_mask, kv_cache, noise, num_steps=3))
+    assert batched.shape == (3, config.action_horizon, config.action_dim)
+    for i in range(3):
+        single = np.asarray(from_prefix(prepared, prefix_mask, kv_cache, noise[i : i + 1], num_steps=3))
+        np.testing.assert_allclose(batched[i], single[0], rtol=1e-5, atol=1e-5)
